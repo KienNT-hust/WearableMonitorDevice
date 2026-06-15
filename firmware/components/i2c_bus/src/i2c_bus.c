@@ -153,10 +153,11 @@ esp_err_t i2c_bus_write(i2c_bus_handle_t handle,
     i2c_master_write(cmd, buf, len, true);
     i2c_master_stop(cmd);
 
-    i2c_cmd_link_delete(cmd);
-    xSemaphoreGive(bus->mutex);
     esp_err_t err = i2c_master_cmd_begin(bus->port, cmd,
                                          pdMS_TO_TICKS(bus->timeout_ms));
+    i2c_cmd_link_delete(cmd);
+    xSemaphoreGive(bus->mutex);
+
     if (err != ESP_OK)
     {
         ESP_LOGW(TAG, "Write fail addr=0x%02X reg=0x%02X: %s",
@@ -172,6 +173,7 @@ void i2c_bus_scan(i2c_bus_handle_t handle)
         return;
     ESP_LOGI(TAG, "Scanning I2C bus...");
 
+    i2c_bus_t *bus = (i2c_bus_t *)handle;
     int count = 0;
     for (uint8_t addr = 0x01; addr < 0x7F; addr++)
     {
@@ -180,9 +182,13 @@ void i2c_bus_scan(i2c_bus_handle_t handle)
         i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
         i2c_master_stop(cmd);
 
-        i2c_bus_t *bus = (i2c_bus_t *)handle;
-        esp_err_t err = i2c_master_cmd_begin(bus->port, cmd,
-                                             pdMS_TO_TICKS(50));
+        /* FIX: lay mutex truoc khi dung peripheral, giong read/write */
+        esp_err_t err = ESP_ERR_TIMEOUT;
+        if (xSemaphoreTake(bus->mutex, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
+            err = i2c_master_cmd_begin(bus->port, cmd, pdMS_TO_TICKS(50));
+            xSemaphoreGive(bus->mutex);
+        }
         i2c_cmd_link_delete(cmd);
 
         if (err == ESP_OK)
